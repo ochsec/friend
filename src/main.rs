@@ -62,6 +62,7 @@ struct App {
     input_mode: bool,
     input_text: String,
     last_refresh: Instant,
+    message_limit: usize,
 }
 
 impl App {
@@ -120,7 +121,7 @@ impl App {
         }
 
         // Fetch initial messages from all providers
-        let messages = integration_manager.fetch_all_messages(None).await;
+        let messages = integration_manager.fetch_all_messages(None, Some(config.message_limit)).await;
         let selected_message = if messages.is_empty() { None } else { Some(0) };
 
         Ok(App {
@@ -130,11 +131,12 @@ impl App {
             input_mode: false,
             input_text: String::new(),
             last_refresh: Instant::now(),
+            message_limit: config.message_limit,
         })
     }
     
     async fn refresh_messages(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.messages = self.integration_manager.fetch_all_messages(None).await;
+        self.messages = self.integration_manager.fetch_all_messages(None, Some(self.message_limit)).await;
         if self.messages.is_empty() {
             self.selected_message = None;
         } else if self.selected_message.is_none() {

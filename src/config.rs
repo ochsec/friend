@@ -6,6 +6,7 @@ pub struct Config {
     pub discord: Option<DiscordConfig>,
     pub github: Option<GitHubConfig>,
     pub jira: Option<JiraConfig>,
+    pub message_limit: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -110,11 +111,17 @@ impl Config {
             None
         };
 
+        let message_limit = env::var("MESSAGE_LIMIT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(100); // Default to 100 messages
+
         Ok(Config {
             telegram,
             discord,
             github,
             jira,
+            message_limit,
         })
     }
 

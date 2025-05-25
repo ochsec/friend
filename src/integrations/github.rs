@@ -123,7 +123,7 @@ impl MessageProvider for GitHubProvider {
             }
         }
         
-        all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp)); // Already newest first - keep it
         Ok(all_messages)
     }
 

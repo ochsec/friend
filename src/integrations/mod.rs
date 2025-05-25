@@ -31,7 +31,7 @@ impl IntegrationManager {
         self.providers.push(provider);
     }
 
-    pub async fn fetch_all_messages(&self, since: Option<DateTime<Utc>>) -> Vec<Message> {
+    pub async fn fetch_all_messages(&self, since: Option<DateTime<Utc>>, limit: Option<usize>) -> Vec<Message> {
         let mut all_messages = Vec::new();
         
         for provider in &self.providers {
@@ -40,7 +40,13 @@ impl IntegrationManager {
             }
         }
         
-        all_messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp)); // Newest first
+        
+        // Apply limit if specified
+        if let Some(limit) = limit {
+            all_messages.truncate(limit);
+        }
+        
         all_messages
     }
 }

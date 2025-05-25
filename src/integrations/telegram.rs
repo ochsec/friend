@@ -224,7 +224,7 @@ impl MessageProvider for TelegramProvider {
             }
         }
         
-        messages.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp)); // Newest first
         Ok(messages)
     }
 

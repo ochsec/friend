@@ -106,6 +106,7 @@ impl MessageProvider for DiscordProvider {
             }
         }
         
+        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp)); // Newest first
         Ok(messages)
     }
 
