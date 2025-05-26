@@ -40,6 +40,7 @@ impl GitHubProvider {
             timestamp,
             author: "GitHub".to_string(),
             attachments: vec![],
+            channel_id: None,
         })
     }
 
@@ -79,6 +80,7 @@ impl GitHubProvider {
             timestamp,
             author: actor.to_string(),
             attachments: vec![],
+            channel_id: None,
         })
     }
 }
@@ -141,5 +143,9 @@ impl MessageProvider for GitHubProvider {
 
     fn source(&self) -> MessageSource {
         MessageSource::Github
+    }
+
+    fn channel_id(&self) -> Option<String> {
+        None
     }
 }

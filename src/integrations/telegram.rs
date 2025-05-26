@@ -165,6 +165,7 @@ impl TelegramProvider {
             timestamp,
             author: from.to_string(),
             attachments,
+            channel_id: msg["chat"]["id"].as_i64().map(|id| id.to_string()),
         })
     }
 
@@ -325,5 +326,9 @@ impl MessageProvider for TelegramProvider {
 
     fn source(&self) -> MessageSource {
         MessageSource::Telegram
+    }
+
+    fn channel_id(&self) -> Option<String> {
+        self.chat_id.clone()
     }
 }

@@ -20,7 +20,7 @@ mod config;
 use config::Config;
 use integrations::{IntegrationManager, telegram::TelegramProvider, discord::DiscordProvider, github::GitHubProvider, jira::JiraProvider};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum MessageSource {
     Telegram,
     Discord,
@@ -53,6 +53,7 @@ pub struct Message {
     pub timestamp: DateTime<Utc>,
     pub author: String,
     pub attachments: Vec<Attachment>,
+    pub channel_id: Option<String>,
 }
 
 struct App {
@@ -207,10 +208,25 @@ impl App {
         self.input_text.clear();
         self.input_mode = false;
         
-        // Try to send to the first available provider that supports sending
-        // In the future, this could be made configurable or provider-specific
+        // Determine which provider to use based on the selected message
+        let (target_source, target_channel) = if let Some(selected_msg) = self.get_selected_message() {
+            (Some(selected_msg.source), selected_msg.channel_id.clone())
+        } else {
+            (None, None)
+        };
+        
+        // Find a provider that matches both the target source and channel
         let providers = &self.integration_manager.providers;
-        if let Some(provider) = providers.first() {
+        let target_provider = if let Some(source) = target_source {
+            providers.iter().find(|p| {
+                p.source() == source && 
+                (target_channel.is_none() || p.channel_id() == target_channel)
+            })
+        } else {
+            providers.first()
+        };
+        
+        if let Some(provider) = target_provider {
             match provider.send_message(&message_content).await {
                 Ok(()) => {
                     // Refresh messages to show the sent message
@@ -220,27 +236,31 @@ impl App {
                 }
                 Err(e) => {
                     // Add a local error message if sending failed
+                    let error_source = target_source.unwrap_or(MessageSource::Discord);
                     let error_message = Message {
                         id: (self.messages.len() + 1) as u64,
-                        source: MessageSource::Discord,
+                        source: error_source,
                         content: format!("❌ Failed to send: {} (Error: {})", message_content, e),
                         timestamp: Utc::now(),
                         author: "System".to_string(),
                         attachments: vec![],
+                        channel_id: None,
                     };
                     self.messages.push(error_message);
                     self.selected_message = Some(self.messages.len() - 1);
                 }
             }
         } else {
-            // No providers available
+            // No matching provider available
+            let error_source = target_source.unwrap_or(MessageSource::Discord);
             let error_message = Message {
                 id: (self.messages.len() + 1) as u64,
-                source: MessageSource::Discord,
-                content: format!("❌ No providers configured to send: {}", message_content),
+                source: error_source,
+                content: format!("❌ No provider configured for {:?}: {}", error_source, message_content),
                 timestamp: Utc::now(),
                 author: "System".to_string(),
                 attachments: vec![],
+                channel_id: None,
             };
             self.messages.push(error_message);
             self.selected_message = Some(self.messages.len() - 1);

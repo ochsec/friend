@@ -48,6 +48,7 @@ impl JiraProvider {
             timestamp,
             author: assignee.to_string(),
             attachments: vec![],
+            channel_id: None,
         })
     }
 
@@ -161,5 +162,9 @@ impl MessageProvider for JiraProvider {
 
     fn source(&self) -> MessageSource {
         MessageSource::Jira
+    }
+
+    fn channel_id(&self) -> Option<String> {
+        None
     }
 }

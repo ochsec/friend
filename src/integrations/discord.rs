@@ -76,6 +76,7 @@ impl DiscordProvider {
             timestamp,
             author: author.to_string(),
             attachments,
+            channel_id: Some(self.channel_id.clone()),
         })
     }
 }
@@ -175,5 +176,9 @@ impl MessageProvider for DiscordProvider {
 
     fn source(&self) -> MessageSource {
         MessageSource::Discord
+    }
+
+    fn channel_id(&self) -> Option<String> {
+        Some(self.channel_id.clone())
     }
 }

@@ -14,6 +14,7 @@ pub trait MessageProvider {
     async fn send_message_with_attachment(&self, content: &str, attachment_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     async fn download_attachment(&self, attachment: &Attachment, save_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     fn source(&self) -> MessageSource;
+    fn channel_id(&self) -> Option<String>;
 }
 
 pub struct IntegrationManager {
