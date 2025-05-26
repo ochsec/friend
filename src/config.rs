@@ -7,6 +7,15 @@ pub struct Config {
     pub github: Option<GitHubConfig>,
     pub jira: Option<JiraConfig>,
     pub message_limit: usize,
+    pub colors: ColorConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct ColorConfig {
+    pub selected_bg: Option<String>,
+    pub selected_fg: Option<String>,
+    pub input_active: Option<String>,
+    pub input_inactive: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -116,12 +125,20 @@ impl Config {
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(100); // Default to 100 messages
 
+        let colors = ColorConfig {
+            selected_bg: env::var("SELECTED_BG_COLOR").ok(),
+            selected_fg: env::var("SELECTED_FG_COLOR").ok(),
+            input_active: env::var("INPUT_ACTIVE_COLOR").ok(),
+            input_inactive: env::var("INPUT_INACTIVE_COLOR").ok(),
+        };
+
         Ok(Config {
             telegram,
             discord,
             github,
             jira,
             message_limit,
+            colors,
         })
     }
 

@@ -63,6 +63,29 @@ struct App {
     input_text: String,
     last_refresh: Instant,
     message_limit: usize,
+    colors: config::ColorConfig,
+}
+
+fn parse_color(color_name: &str) -> Color {
+    match color_name.to_lowercase().as_str() {
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "gray" | "grey" => Color::Gray,
+        "darkgray" | "darkgrey" => Color::DarkGray,
+        "lightred" => Color::LightRed,
+        "lightgreen" => Color::LightGreen,
+        "lightyellow" => Color::LightYellow,
+        "lightblue" => Color::LightBlue,
+        "lightmagenta" => Color::LightMagenta,
+        "lightcyan" => Color::LightCyan,
+        "white" => Color::White,
+        _ => Color::Reset, // Use terminal default
+    }
 }
 
 impl App {
@@ -132,6 +155,7 @@ impl App {
             input_text: String::new(),
             last_refresh: Instant::now(),
             message_limit: config.message_limit,
+            colors: config.colors,
         })
     }
     
@@ -283,7 +307,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     
                     let style = if Some(i) == app.selected_message {
-                        Style::default().bg(Color::Blue).fg(Color::White)
+                        let mut style = Style::default();
+                        if let Some(ref bg_color) = app.colors.selected_bg {
+                            style = style.bg(parse_color(bg_color));
+                        } else {
+                            style = style.bg(Color::Blue); // Default
+                        }
+                        if let Some(ref fg_color) = app.colors.selected_fg {
+                            style = style.fg(parse_color(fg_color));
+                        }
+                        style
                     } else {
                         Style::default()
                     };
@@ -294,7 +327,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let messages_list = List::new(items)
                 .block(Block::default().borders(Borders::ALL).title("Messages"))
-                .style(Style::default().fg(Color::White));
+                .style(Style::default());
 
             let mut list_state = ratatui::widgets::ListState::default();
             if let Some(selected) = app.selected_message {
@@ -340,14 +373,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let content_area = Paragraph::new(content)
                 .block(Block::default().borders(Borders::ALL).title("Content"))
-                .style(Style::default().fg(Color::White));
+                .style(Style::default());
 
             f.render_widget(content_area, content_chunks[0]);
             
             let input_style = if app.input_mode {
-                Style::default().fg(Color::Yellow)
+                let color = if let Some(ref active_color) = app.colors.input_active {
+                    parse_color(active_color)
+                } else {
+                    Color::Yellow // Default
+                };
+                Style::default().fg(color)
             } else {
-                Style::default().fg(Color::Gray)
+                let color = if let Some(ref inactive_color) = app.colors.input_inactive {
+                    parse_color(inactive_color)
+                } else {
+                    Color::DarkGray // Default
+                };
+                Style::default().fg(color)
             };
             
             let input_title = if app.input_mode {
