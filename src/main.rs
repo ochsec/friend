@@ -296,7 +296,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .block(Block::default().borders(Borders::ALL).title("Messages"))
                 .style(Style::default().fg(Color::White));
 
-            f.render_widget(messages_list, chunks[0]);
+            let mut list_state = ratatui::widgets::ListState::default();
+            if let Some(selected) = app.selected_message {
+                list_state.select(Some(selected));
+            }
+
+            f.render_stateful_widget(messages_list, chunks[0], &mut list_state);
 
             let content = if let Some(msg) = app.get_selected_message() {
                 let mut text = format!(
@@ -346,9 +351,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             
             let input_title = if app.input_mode {
-                "Input (Shift+Enter to send, Esc to cancel)"
+                "Input (Tab to send, Esc to cancel)"
             } else {
-                "Input (Enter to type, Shift+Enter to send)"
+                "Input (Enter to type, Tab to send)"
             };
             
             let input_area = Paragraph::new(app.input_text.as_str())
@@ -368,17 +373,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Event::Key(key) = event::read()? {
             if app.input_mode {
                 match key.code {
-                    KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::SHIFT) && c == '\n' => {
-                        // Shift+Enter to send message
-                        if let Err(e) = app.send_message().await {
-                            eprintln!("Error sending message: {}", e);
+                    KeyCode::Enter => {
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            // Shift+Enter to send message
+                            if let Err(e) = app.send_message().await {
+                                eprintln!("Error sending message: {}", e);
+                            }
                         }
-                    }
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                        // Shift+Enter to send message
-                        if let Err(e) = app.send_message().await {
-                            eprintln!("Error sending message: {}", e);
-                        }
+                        // Regular Enter does nothing in input mode
                     }
                     KeyCode::Esc => {
                         app.input_mode = false;
@@ -389,6 +391,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     KeyCode::Char(c) => {
                         app.input_text.push(c);
+                    }
+                    KeyCode::Tab => {
+                        // Alternative: Use Tab to send message in input mode
+                        if let Err(e) = app.send_message().await {
+                            eprintln!("Error sending message: {}", e);
+                        }
                     }
                     _ => {}
                 }
@@ -403,12 +411,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Enter => {
-                        app.input_mode = true;
-                    }
-                    KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::SHIFT) && c == '\n' => {
-                        app.input_mode = true;
-                    }
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        // Enter to start typing
                         app.input_mode = true;
                     }
                     _ => {}
