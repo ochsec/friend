@@ -11,7 +11,9 @@ pub mod jira;
 pub trait MessageProvider {
     async fn fetch_messages(&self, since: Option<DateTime<Utc>>) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>>;
     async fn send_message(&self, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    #[allow(dead_code)]
     async fn send_message_with_attachment(&self, content: &str, attachment_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    #[allow(dead_code)]
     async fn download_attachment(&self, attachment: &Attachment, save_path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     fn source(&self) -> MessageSource;
     fn channel_id(&self) -> Option<String>;

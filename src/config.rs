@@ -20,8 +20,10 @@ pub struct ColorConfig {
 
 #[derive(Debug, Clone)]
 pub struct TelegramConfig {
-    pub bot_token: String,
-    pub chat_ids: Option<Vec<String>>,
+    pub api_id: i32,
+    pub api_hash: String,
+    pub phone: String,
+    pub session_file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,23 +47,20 @@ pub struct JiraConfig {
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_env() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         dotenv::dotenv().ok();
 
-        let telegram = if let Ok(bot_token) = env::var("TELEGRAM_BOT_TOKEN") {
-            let chat_ids = if let Ok(chat_ids_str) = env::var("TELEGRAM_CHAT_IDS") {
-                let ids: Vec<String> = chat_ids_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                
-                if ids.is_empty() { None } else { Some(ids) }
+        let telegram = if let (Ok(api_id_str), Ok(api_hash), Ok(phone)) = (
+            env::var("TELEGRAM_API_ID"),
+            env::var("TELEGRAM_API_HASH"),
+            env::var("TELEGRAM_PHONE"),
+        ) {
+            if let Ok(api_id) = api_id_str.parse::<i32>() {
+                let session_file = env::var("TELEGRAM_SESSION_FILE").ok();
+                Some(TelegramConfig { api_id, api_hash, phone, session_file })
             } else {
                 None
-            };
-            
-            Some(TelegramConfig { bot_token, chat_ids })
+            }
         } else {
             None
         };

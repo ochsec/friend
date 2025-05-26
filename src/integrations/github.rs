@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 use serde_json::Value;
-use crate::{Message, MessageSource, Attachment};
+use crate::{Message, MessageSource};
 use super::MessageProvider;
 
 pub struct GitHubProvider {

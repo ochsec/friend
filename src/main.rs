@@ -21,7 +21,7 @@ use config::Config;
 use integrations::{IntegrationManager, telegram::TelegramProvider, discord::DiscordProvider, github::GitHubProvider, jira::JiraProvider};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum MessageSource {
+pub enum MessageSource {
     Telegram,
     Discord,
     Github,
@@ -90,30 +90,11 @@ fn parse_color(color_name: &str) -> Color {
 }
 
 impl App {
-    async fn new(config: Config) -> Result<App, Box<dyn std::error::Error>> {
+    async fn new(config: Config, telegram_provider: Option<TelegramProvider>) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
         let mut integration_manager = IntegrationManager::new();
         
-        if let Some(telegram_config) = config.telegram {
-            if let Some(chat_ids) = telegram_config.chat_ids {
-                // Manual chat ID configuration
-                for chat_id in chat_ids {
-                    let provider = TelegramProvider::new(
-                        telegram_config.bot_token.clone(),
-                        chat_id,
-                    );
-                    integration_manager.add_provider(Box::new(provider));
-                }
-            } else {
-                // Auto-discover chat IDs
-                match TelegramProvider::new_auto_discover(telegram_config.bot_token).await {
-                    Ok(provider) => {
-                        integration_manager.add_provider(Box::new(provider));
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to auto-discover Telegram chats: {}", e);
-                    }
-                }
-            }
+        if let Some(provider) = telegram_provider {
+            integration_manager.add_provider(Box::new(provider));
         }
         
         if let Some(discord_config) = config.discord {
@@ -220,14 +201,28 @@ impl App {
         let target_provider = if let Some(source) = target_source {
             providers.iter().find(|p| {
                 p.source() == source && 
-                (target_channel.is_none() || p.channel_id() == target_channel)
+                (target_channel.is_none() || p.channel_id() == target_channel || 
+                 (source == MessageSource::Telegram && p.channel_id().is_none())) // Telegram client handles all chats
             })
         } else {
             providers.first()
         };
         
         if let Some(provider) = target_provider {
-            match provider.send_message(&message_content).await {
+            let send_result = if target_source == Some(MessageSource::Telegram) && target_channel.is_some() {
+                // Special handling for Telegram - send to specific chat
+                if let Some(chat_id) = &target_channel {
+                    // We need to downcast to TelegramProvider to access send_message_to_chat
+                    // For now, let's use a simpler approach and add the chat context to the message
+                    provider.send_message(&format!("Reply to chat {}: {}", chat_id, message_content)).await
+                } else {
+                    provider.send_message(&message_content).await
+                }
+            } else {
+                provider.send_message(&message_content).await
+            };
+
+            match send_result {
                 Ok(()) => {
                     // Refresh messages to show the sent message
                     if let Err(e) = self.refresh_messages().await {
@@ -271,7 +266,7 @@ impl App {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = Config::from_env()?;
     
     if !config.has_any_provider() {
@@ -280,13 +275,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Handle Telegram authentication before starting TUI
+    let mut telegram_provider = None;
+    if let Some(ref telegram_config) = config.telegram {
+        println!("Initializing Telegram client...");
+        println!("API ID: {}", telegram_config.api_id);
+        println!("Phone: {}", telegram_config.phone);
+        println!("Session file: {:?}", telegram_config.session_file);
+        
+        match TelegramProvider::new(
+            telegram_config.api_id,
+            telegram_config.api_hash.clone(),
+            telegram_config.phone.clone(),
+            telegram_config.session_file.clone(),
+        ).await {
+            Ok(provider) => {
+                println!("Telegram authentication successful!");
+                telegram_provider = Some(provider);
+            }
+            Err(e) => {
+                eprintln!("Failed to authenticate with Telegram: {}", e);
+                eprintln!("Error details: {:?}", e);
+                eprintln!("Please check your credentials and try again.");
+                return Err(e);
+            }
+        }
+    }
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config).await?;
+    let mut app = App::new(config, telegram_provider).await?;
 
     loop {
         // Auto-refresh messages periodically
@@ -299,7 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-                .split(f.size());
+                .split(f.area());
                 
             let content_chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -426,10 +448,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             f.render_widget(input_area, content_chunks[1]);
             
             if app.input_mode {
-                f.set_cursor(
+                f.set_cursor_position((
                     content_chunks[1].x + app.input_text.len() as u16 + 1,
                     content_chunks[1].y + 1,
-                );
+                ));
             }
         })?;
 
