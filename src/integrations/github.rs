@@ -148,4 +148,13 @@ impl MessageProvider for GitHubProvider {
     fn channel_id(&self) -> Option<String> {
         None
     }
+    
+    fn provider_key(&self) -> String {
+        format!("github_{}", self.username)
+    }
+    
+    async fn fetch_messages_since_id(&self, _last_message_id: Option<u64>) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        // For now, just use the regular fetch method
+        self.fetch_messages(None).await
+    }
 }

@@ -181,4 +181,14 @@ impl MessageProvider for DiscordProvider {
     fn channel_id(&self) -> Option<String> {
         Some(self.channel_id.clone())
     }
+    
+    fn provider_key(&self) -> String {
+        format!("discord_{}", self.channel_id)
+    }
+    
+    async fn fetch_messages_since_id(&self, _last_message_id: Option<u64>) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        // For now, just use the regular fetch method
+        // TODO: Implement proper incremental fetch using Discord's after parameter
+        self.fetch_messages(None).await
+    }
 }

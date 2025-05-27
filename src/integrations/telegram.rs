@@ -281,8 +281,8 @@ impl MessageProvider for TelegramProvider {
     async fn fetch_messages(&self, since: Option<DateTime<Utc>>) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
         let mut messages = Vec::new();
         
-        // Get all dialogs (chats) - limit to first 20 for faster loading
-        let mut dialogs = self.client.iter_dialogs().limit(20);
+        // Get dialogs (chats) - reduce to 5 for much faster loading
+        let mut dialogs = self.client.iter_dialogs().limit(5);
         let mut _chat_count = 0;
         
         while let Some(dialog) = dialogs.next().await? {
@@ -303,8 +303,8 @@ impl MessageProvider for TelegramProvider {
                 continue;
             }
             
-            // Get messages from this chat - reduce to 10 messages per chat for faster loading
-            let limit = 10;
+            // Get messages from this chat - reduce to 3 messages per chat for faster loading
+            let limit = 3;
             let mut chat_messages = self.client.iter_messages(chat).limit(limit);
             
             while let Some(message) = chat_messages.next().await? {
@@ -386,5 +386,48 @@ impl MessageProvider for TelegramProvider {
     fn channel_id(&self) -> Option<String> {
         // Return None since we're fetching from all chats
         None
+    }
+    
+    fn provider_key(&self) -> String {
+        format!("telegram_{}", self.api_id)
+    }
+    
+    async fn fetch_messages_since_id(&self, last_message_id: Option<u64>) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        let mut messages = Vec::new();
+        
+        // Get fewer dialogs for incremental sync (just 3 most recent)
+        let mut dialogs = self.client.iter_dialogs().limit(3);
+        
+        while let Some(dialog) = dialogs.next().await? {
+            let chat = dialog.chat();
+            
+            // Skip channels for incremental sync
+            if let grammers_client::types::Chat::Channel(_) = chat {
+                continue;
+            }
+            
+            // Get only 2 most recent messages per chat for incremental sync
+            let mut chat_messages = self.client.iter_messages(chat).limit(2);
+            
+            while let Some(message) = chat_messages.next().await? {
+                let message_id = message.id() as u64;
+                
+                // Skip messages we've already seen
+                if let Some(last_id) = last_message_id {
+                    if message_id <= last_id {
+                        break; // Messages are in reverse chronological order
+                    }
+                }
+                
+                // Convert to our Message format
+                if let Some(msg) = self.convert_message(&message) {
+                    messages.push(msg);
+                }
+            }
+        }
+        
+        // Sort by timestamp (newest first)
+        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        Ok(messages)
     }
 }

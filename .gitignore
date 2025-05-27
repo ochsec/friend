@@ -1,3 +1,6 @@
 /target
 .env
 *.log
+messages.db
+telegram_session.session
+

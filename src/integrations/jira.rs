@@ -167,4 +167,13 @@ impl MessageProvider for JiraProvider {
     fn channel_id(&self) -> Option<String> {
         None
     }
+    
+    fn provider_key(&self) -> String {
+        format!("jira_{}", self.base_url.replace("https://", "").replace("http://", ""))
+    }
+    
+    async fn fetch_messages_since_id(&self, _last_message_id: Option<u64>) -> Result<Vec<Message>, Box<dyn std::error::Error + Send + Sync>> {
+        // For now, just use the regular fetch method
+        self.fetch_messages(None).await
+    }
 }

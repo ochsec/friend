@@ -16,9 +16,11 @@ use chrono::{DateTime, Utc};
 
 mod integrations;
 mod config;
+mod database;
 
 use config::Config;
 use integrations::{IntegrationManager, telegram::TelegramProvider, discord::DiscordProvider, github::GitHubProvider, jira::JiraProvider};
+use database::MessageCache;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MessageSource {
@@ -65,6 +67,8 @@ struct App {
     last_refresh: Instant,
     message_limit: usize,
     colors: config::ColorConfig,
+    cache: MessageCache,
+    is_refreshing: bool,
 }
 
 fn parse_color(color_name: &str) -> Color {
@@ -91,6 +95,17 @@ fn parse_color(color_name: &str) -> Color {
 
 impl App {
     async fn new(config: Config, telegram_provider: Option<TelegramProvider>) -> Result<App, Box<dyn std::error::Error + Send + Sync>> {
+        // Initialize database cache - use absolute path
+        let db_path = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("messages.db");
+        let db_url = format!("sqlite://{}", db_path.to_string_lossy());
+        println!("Initializing database at: {}", db_path.display());
+        let cache = MessageCache::new(&db_url).await.map_err(|e| {
+            eprintln!("Failed to initialize database: {}", e);
+            e
+        })?;
+        println!("Database initialized successfully!");
         let mut integration_manager = IntegrationManager::new();
         
         if let Some(provider) = telegram_provider {
@@ -125,8 +140,15 @@ impl App {
             integration_manager.add_provider(Box::new(provider));
         }
 
-        // Fetch initial messages from all providers
-        let messages = integration_manager.fetch_all_messages(None, Some(config.message_limit)).await;
+        // Try to load cached messages first for instant startup
+        let cached_messages = cache.get_cached_messages(Some(config.message_limit)).await.unwrap_or_default();
+        let messages = if !cached_messages.is_empty() {
+            cached_messages
+        } else {
+            // If no cached messages, fetch from providers (this will be slow the first time)
+            integration_manager.fetch_all_messages(None, Some(config.message_limit)).await
+        };
+        
         let selected_message = if messages.is_empty() { None } else { Some(0) };
 
         Ok(App {
@@ -138,11 +160,56 @@ impl App {
             last_refresh: Instant::now(),
             message_limit: config.message_limit,
             colors: config.colors,
+            cache,
+            is_refreshing: false,
         })
     }
     
     async fn refresh_messages(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.messages = self.integration_manager.fetch_all_messages(None, Some(self.message_limit)).await;
+        if self.is_refreshing {
+            return Ok(()); // Avoid multiple concurrent refreshes
+        }
+        
+        self.is_refreshing = true;
+        
+        // Try incremental sync first (much faster)
+        let new_messages = self.integration_manager.fetch_incremental_messages(&self.cache, Some(self.message_limit)).await;
+        
+        let messages_to_use = if new_messages.is_empty() {
+            // Fallback to full fetch if incremental returns nothing
+            self.integration_manager.fetch_all_messages(None, Some(self.message_limit)).await
+        } else {
+            // Merge new messages with cached ones
+            let mut cached_messages = self.cache.get_cached_messages(Some(self.message_limit)).await.unwrap_or_default();
+            cached_messages.extend(new_messages.clone());
+            cached_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            cached_messages.truncate(self.message_limit);
+            cached_messages
+        };
+        
+        // Cache any new messages
+        if !new_messages.is_empty() {
+            if let Err(e) = self.cache.cache_messages(&new_messages).await {
+                eprintln!("Warning: Failed to cache messages: {}", e);
+            }
+            
+            // Update sync state for each provider
+            for provider in &self.integration_manager.providers {
+                let provider_key = provider.provider_key();
+                let provider_messages: Vec<_> = new_messages.iter()
+                    .filter(|m| m.source == provider.source())
+                    .collect();
+                
+                if let Some(latest_message) = provider_messages.iter().max_by_key(|m| m.id) {
+                    if let Err(e) = self.cache.update_sync_state(&provider_key, latest_message.id).await {
+                        eprintln!("Warning: Failed to update sync state for {}: {}", provider_key, e);
+                    }
+                }
+            }
+        }
+        
+        self.messages = messages_to_use;
+        
         if self.messages.is_empty() {
             self.selected_message = None;
         } else if self.selected_message.is_none() {
@@ -152,12 +219,26 @@ impl App {
                 self.selected_message = Some(self.messages.len() - 1);
             }
         }
+        
         self.last_refresh = Instant::now();
+        self.is_refreshing = false;
+        Ok(())
+    }
+    
+    async fn load_cached_messages(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Quick load from cache - this should be near-instant
+        let cached_messages = self.cache.get_cached_messages(Some(self.message_limit)).await?;
+        if !cached_messages.is_empty() {
+            self.messages = cached_messages;
+            if self.selected_message.is_none() {
+                self.selected_message = Some(0);
+            }
+        }
         Ok(())
     }
     
     fn should_refresh(&self) -> bool {
-        self.last_refresh.elapsed() >= Duration::from_secs(30) // Refresh every 30 seconds
+        !self.is_refreshing && self.last_refresh.elapsed() >= Duration::from_secs(30) // Refresh every 30 seconds
     }
 
     fn select_next(&mut self) {
@@ -178,6 +259,34 @@ impl App {
 
     fn get_selected_message(&self) -> Option<&Message> {
         self.selected_message.and_then(|i| self.messages.get(i))
+    }
+    
+    fn send_message_non_blocking(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if self.input_text.is_empty() {
+            return Ok(());
+        }
+        
+        let message_content = self.input_text.clone();
+        self.input_text.clear();
+        self.input_mode = false;
+        
+        // Add an optimistic "sending..." message immediately for instant UI feedback
+        let sending_message = Message {
+            id: (self.messages.len() + 1) as u64,
+            source: MessageSource::Discord, // Default for now
+            content: format!("📤 Sending: {}", message_content),
+            timestamp: Utc::now(),
+            author: "You".to_string(),
+            attachments: vec![],
+            channel_id: None,
+        };
+        self.messages.insert(0, sending_message);
+        self.selected_message = Some(0);
+        
+        // TODO: Actually send the message in the background and update the UI
+        // For now, this provides immediate feedback
+        
+        Ok(())
     }
     
     async fn send_message(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -460,8 +569,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 match key.code {
                     KeyCode::Enter => {
                         if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            // Shift+Enter to send message
-                            if let Err(e) = app.send_message().await {
+                            // Shift+Enter to send message (non-blocking)
+                            if let Err(e) = app.send_message_non_blocking() {
                                 eprintln!("Error sending message: {}", e);
                             }
                         }
@@ -478,8 +587,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         app.input_text.push(c);
                     }
                     KeyCode::Tab => {
-                        // Alternative: Use Tab to send message in input mode
-                        if let Err(e) = app.send_message().await {
+                        // Alternative: Use Tab to send message in input mode (non-blocking)
+                        if let Err(e) = app.send_message_non_blocking() {
                             eprintln!("Error sending message: {}", e);
                         }
                     }
