@@ -379,6 +379,28 @@ impl MessageProvider for TelegramProvider {
         Err("Attachment download requires access to original media objects from messages".into())
     }
 
+    async fn delete_message(&self, message_id: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Find the message across all dialogs
+        let mut dialogs = self.client.iter_dialogs();
+        while let Some(dialog) = dialogs.next().await? {
+            let chat = dialog.chat();
+            
+            // Get recent messages from this chat to find the one with matching ID
+            let mut chat_messages = self.client.iter_messages(chat).limit(50);
+            while let Some(message) = chat_messages.next().await? {
+                if message.id() as u64 == message_id {
+                    // Found the message, attempt to delete it
+                    if let Err(e) = self.client.delete_messages(chat, &[message.id()]).await {
+                        return Err(format!("Failed to delete message: {}", e).into());
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        
+        Err("Message not found or cannot be deleted".into())
+    }
+
     fn source(&self) -> MessageSource {
         MessageSource::Telegram
     }

@@ -241,6 +241,76 @@ impl App {
         !self.is_refreshing && self.last_refresh.elapsed() >= Duration::from_secs(30) // Refresh every 30 seconds
     }
 
+    async fn delete_selected_message(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let selected_index = match self.selected_message {
+            Some(index) => index,
+            None => return Ok(()), // No message selected
+        };
+
+        let message = match self.messages.get(selected_index) {
+            Some(msg) => msg.clone(),
+            None => return Ok(()), // Invalid selection
+        };
+
+        // Find the appropriate provider for this message
+        let provider = self.integration_manager.providers
+            .iter()
+            .find(|p| p.source() == message.source && 
+                     (message.channel_id.is_none() || 
+                      p.channel_id() == message.channel_id || 
+                      (message.source == MessageSource::Telegram && p.channel_id().is_none())));
+
+        if let Some(provider) = provider {
+            match provider.delete_message(message.id).await {
+                Ok(()) => {
+                    // Remove the message from local list
+                    self.messages.remove(selected_index);
+                    
+                    // Update selection
+                    if self.messages.is_empty() {
+                        self.selected_message = None;
+                    } else if selected_index >= self.messages.len() {
+                        self.selected_message = Some(self.messages.len() - 1);
+                    }
+                    
+                    // Remove from cache as well
+                    if let Err(e) = self.cache.delete_message(message.id).await {
+                        eprintln!("Warning: Failed to remove message from cache: {}", e);
+                    }
+                }
+                Err(e) => {
+                    // Add a local error message if deletion failed
+                    let error_message = Message {
+                        id: (self.messages.len() + 1) as u64,
+                        source: message.source,
+                        content: format!("❌ Failed to delete message: {}", e),
+                        timestamp: Utc::now(),
+                        author: "System".to_string(),
+                        attachments: vec![],
+                        channel_id: None,
+                    };
+                    self.messages.insert(0, error_message);
+                    self.selected_message = Some(0);
+                }
+            }
+        } else {
+            // No matching provider available
+            let error_message = Message {
+                id: (self.messages.len() + 1) as u64,
+                source: message.source,
+                content: format!("❌ No provider available to delete {:?} message", message.source),
+                timestamp: Utc::now(),
+                author: "System".to_string(),
+                attachments: vec![],
+                channel_id: None,
+            };
+            self.messages.insert(0, error_message);
+            self.selected_message = Some(0);
+        }
+        
+        Ok(())
+    }
+
     fn select_next(&mut self) {
         if let Some(selected) = self.selected_message {
             if selected < self.messages.len() - 1 {
@@ -602,6 +672,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     KeyCode::Char('r') => {
                         if let Err(e) = app.refresh_messages().await {
                             eprintln!("Error refreshing messages: {}", e);
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        if let Err(e) = app.delete_selected_message().await {
+                            eprintln!("Error deleting message: {}", e);
                         }
                     }
                     KeyCode::Enter => {

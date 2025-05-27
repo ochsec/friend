@@ -250,4 +250,20 @@ impl MessageCache {
 
         Ok(messages)
     }
+
+    pub async fn delete_message(&self, message_id: u64) -> Result<(), sqlx::Error> {
+        // Delete attachments first (foreign key constraint)
+        sqlx::query("DELETE FROM attachments WHERE message_id = ?")
+            .bind(message_id as i64)
+            .execute(&self.pool)
+            .await?;
+        
+        // Delete the message
+        sqlx::query("DELETE FROM messages WHERE id = ?")
+            .bind(message_id as i64)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
 }

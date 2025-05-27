@@ -174,6 +174,22 @@ impl MessageProvider for DiscordProvider {
         Ok(())
     }
 
+    async fn delete_message(&self, message_id: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("https://discord.com/api/v10/channels/{}/messages/{}", self.channel_id, message_id);
+        
+        let response = self.client
+            .delete(&url)
+            .header("Authorization", &self.user_token)
+            .send()
+            .await?;
+            
+        if !response.status().is_success() {
+            return Err(format!("Failed to delete message: {}", response.status()).into());
+        }
+        
+        Ok(())
+    }
+
     fn source(&self) -> MessageSource {
         MessageSource::Discord
     }

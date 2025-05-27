@@ -141,6 +141,10 @@ impl MessageProvider for GitHubProvider {
         Err("GitHub attachments are not downloadable through this interface".into())
     }
 
+    async fn delete_message(&self, _message_id: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("GitHub does not support deleting messages through this interface".into())
+    }
+
     fn source(&self) -> MessageSource {
         MessageSource::Github
     }

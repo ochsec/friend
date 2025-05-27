@@ -160,6 +160,10 @@ impl MessageProvider for JiraProvider {
         Err("Jira attachment downloads not implemented in this interface".into())
     }
 
+    async fn delete_message(&self, _message_id: u64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Err("Jira does not support deleting issues through this interface".into())
+    }
+
     fn source(&self) -> MessageSource {
         MessageSource::Jira
     }
